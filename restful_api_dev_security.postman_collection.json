@@ -1,0 +1,510 @@
+{
+  "info": {
+    "name": "Restful-API-Dev Security Assessment",
+    "description": "Security risk analysis collection for restful-api.dev. Covers auth gaps, data manipulation, IDOR enumeration, rate limiting, input validation, and information disclosure.\n\nTarget: https://api.restful-api.dev/",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "01_Discovery",
+      "item": [
+        {
+          "name": "List All Objects",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/objects",
+              "host": ["{{base_url}}"],
+              "path": ["objects"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 200', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "const json = pm.response.json();",
+                  "pm.test('Lists objects without auth', () => {",
+                  "  pm.expect(Array.isArray(json)).to.be.true;",
+                  "  console.log('Total objects exposed:', json.length);",
+                  "  console.log('SECURITY: Full dataset exposed in single request, no pagination');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02_Auth",
+      "item": [
+        {
+          "name": "GET - No Auth Required (Read)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/objects/1",
+              "host": ["{{base_url}}"],
+              "path": ["objects", "1"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Object accessible without auth', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  const json = pm.response.json();",
+                  "  console.log('SECURITY: Read access with no authentication');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST - Create Object (No Auth)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/objects",
+              "host": ["{{base_url}}"],
+              "path": ["objects"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"name\":\"Apple MacBook Pro 16\",\"data\":{\"year\":2024,\"price\":3499}}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Object created without auth', () => {",
+                  "  pm.response.to.have.status(201);",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json).to.have.property('id');",
+                  "  pm.collectionVariables.set('created_id', json.id);",
+                  "  console.log('CRITICAL: Object created with NO authentication');",
+                  "  console.log('Created ID:', json.id);",
+                  "  console.log('Any user can create data without identity');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH - Modify Object (No Auth)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/objects/{{created_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["objects", "{{created_id}}"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"name\":\"Tampered Object\",\"data\":{\"price\":0.01}}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Object modified without auth', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  console.log('CRITICAL: Object modified without ownership/auth');",
+                  "  console.log('Any user can modify another user\\'s created objects');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "DELETE - Delete Object (No Auth)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/objects/{{created_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["objects", "{{created_id}}"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Object deleted without auth', () => {",
+                  "  if (pm.response.code === 200) {",
+                  "    console.log('CRITICAL: Object permanently deleted with NO authentication');",
+                  "    console.log('Any user can destroy any object');",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "03_Enumeration",
+      "item": [
+        {
+          "name": "Get Object by Sequential ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/objects/1",
+              "host": ["{{base_url}}"],
+              "path": ["objects", "1"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Sequential ID accessible', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  const json = pm.response.json();",
+                  "  console.log('ID 1:', json.name);",
+                  "  console.log('SECURITY: Sequential integer IDs are enumerable');",
+                  "  console.log('Try IDs 2, 3, 4, ... 13 for full dataset');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Out of Range ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/objects/99999",
+              "host": ["{{base_url}}"],
+              "path": ["objects", "99999"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Out of range returns 404', () => {",
+                  "  pm.expect(pm.response.code).to.equal(404);",
+                  "  console.log('INFO: 404 confirms the object does not exist');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04_RateLimit",
+      "item": [
+        {
+          "name": "Rate Limit Check (Use Runner: 20 iterations)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/objects/1",
+              "host": ["{{base_url}}"],
+              "path": ["objects", "1"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const headers = pm.response.headers;",
+                  "pm.test('Check rate limit headers', () => {",
+                  "  const limit = headers.one('x-ratelimit-limit');",
+                  "  const remaining = headers.one('x-ratelimit-remaining');",
+                  "  const retry = headers.one('retry-after');",
+                  "  if (!limit && !remaining && !retry) {",
+                  "    console.log('SECURITY: No rate limit headers found');",
+                  "    console.log('API may have no rate limiting at all');",
+                  "  } else {",
+                  "    console.log('Rate limit:', limit, 'Remaining:', remaining);",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "05_InputValidation",
+      "item": [
+        {
+          "name": "ID Injection in POST Body",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/objects",
+              "host": ["{{base_url}}"],
+              "path": ["objects"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"id\":\"999\",\"name\":\"ID Injection Test\",\"data\":{\"test\":true}}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Check ID injection', () => {",
+                  "  pm.response.to.have.status(201);",
+                  "  const json = pm.response.json();",
+                  "  if (json.id !== '999') {",
+                  "    console.log('INFO: Client ID ignored, server generated UUID:', json.id);",
+                  "    console.log('Still a mass-assignment risk if field is accepted in body');",
+                  "  } else {",
+                  "    console.log('CRITICAL: Client-supplied ID was accepted!');",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Prototype Pollution / NoSQL Injection",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/objects",
+              "host": ["{{base_url}}"],
+              "path": ["objects"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"name\":\"Proto Test\",\"data\":{\"__proto__\":{\"admin\":true},\"$ne\":\"test\"}}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Prototype pollution attempt', () => {",
+                  "  const code = pm.response.code;",
+                  "  if (code === 201) {",
+                  "    console.log('SECURITY: __proto__ and $ne operators accepted in body');",
+                  "    console.log('Potential prototype pollution / NoSQL injection risk');",
+                  "  } else {",
+                  "    console.log('INFO: Rejected with status', code);",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Verbose Error - PUT Reserved ID",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/objects/1",
+              "host": ["{{base_url}}"],
+              "path": ["objects", "1"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"name\":\"Hacked\",\"data\":{\"price\":0}}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Verbose error inspection', () => {",
+                  "  const body = pm.response.text();",
+                  "  if (body.includes('reserved id') || body.includes('cannot be overridden')) {",
+                  "    console.log('SECURITY: Verbose error reveals internal logic');",
+                  "    console.log('Leaks: reserved ID range, workaround (create then modify)');",
+                  "    console.log('Response:', body);",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "06_InfoDisclosure",
+      "item": [
+        {
+          "name": "Response Headers Inspection",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/objects/1",
+              "host": ["{{base_url}}"],
+              "path": ["objects", "1"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Check for verbose headers', () => {",
+                  "  const h = pm.response.headers;",
+                  "  ['server', 'x-powered-by', 'x-cloud-trace-context'].forEach(key => {",
+                  "    const val = h.one(key);",
+                  "    if (val) console.log('HEADER:', key, '=', val);",
+                  "  });",
+                  "  if (h.one('access-control-allow-origin') === '*') {",
+                  "    console.log('CORS: access-control-allow-origin: * (any site can read responses)');",
+                  "  }",
+                  "  console.log('Cache:', h.one('cache-control'));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CORS Check with Malicious Origin",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "https://evil.com"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/objects/1",
+              "host": ["{{base_url}}"],
+              "path": ["objects", "1"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('CORS policy test', () => {",
+                  "  const acao = pm.response.headers.one('access-control-allow-origin');",
+                  "  if (acao) {",
+                  "    console.log('CORS:', acao);",
+                  "    if (acao === '*') console.log('SECURITY: Any origin allowed - cross-origin read possible');",
+                  "  } else {",
+                  "    console.log('No CORS header returned for evil.com origin');",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "07_DebugEndpoints",
+      "item": [
+        {
+          "name": "Swagger/OpenAPI Discovery",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/swagger.json",
+              "host": ["{{base_url}}"],
+              "path": ["swagger.json"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Check for API documentation endpoint', () => {",
+                  "  console.log('Status:', pm.response.code);",
+                  "  if (pm.response.code !== 404) {",
+                  "    console.log('INFO: API documentation may be exposed');",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "https://api.restful-api.dev",
+      "type": "string"
+    },
+    {
+      "key": "created_id",
+      "value": "",
+      "type": "string"
+    }
+  ]
+}
